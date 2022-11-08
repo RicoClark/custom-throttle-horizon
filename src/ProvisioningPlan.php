@@ -56,9 +56,6 @@ class ProvisioningPlan
      */
     public static function get($master)
     {
-        $horizonService = app()->make(\App\Interfaces\Services\Core\IHorizonService::class);
-        $horizonService->updateHorizonConfigForSuppliersAndWebshops();
-
         return new static($master, config('horizon.environments'), config('horizon.defaults', []));
     }
 
