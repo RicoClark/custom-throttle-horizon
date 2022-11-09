@@ -55,7 +55,9 @@ class JobPayload implements ArrayAccess
      */
     public function tags()
     {
-        return Arr::get($this->decoded, 'tags', []);
+        $prefix = ($this->tags()[0] ?? '') . ':';
+
+        return $prefix . ($this->decoded['uuid'] ?? $this->decoded['id']);
     }
 
     /**
