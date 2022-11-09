@@ -2,9 +2,10 @@
 
 namespace Laravel\Horizon;
 
-use Illuminate\Contracts\Queue\Factory as QueueFactory;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Redis;
 use Laravel\Horizon\Contracts\MetricsRepository;
+use Illuminate\Contracts\Queue\Factory as QueueFactory;
 
 class AutoScaler
 {
@@ -49,8 +50,22 @@ class AutoScaler
             $supervisor, $this->timeToClearPerQueue($supervisor, $pools)
         );
 
-        $workers->each(function ($workers, $queue) use ($supervisor, $pools) {
-            $this->scalePool($supervisor, $pools[$queue], $workers);
+        $queueNames = $this->getQueueNamesForThrottleJobs();
+        $workersPerSupervisor = [];
+
+        foreach ($queueNames as $key) {
+            $parts = explode('-', $key);
+            $queue = $parts[0] . '-' . $parts[1];
+
+            if (!isset($workersPerSupervisor[$queue])) {
+                $workersPerSupervisor[$queue] = 0;
+            }
+
+            $workersPerSupervisor[$queue] += 1;
+        }
+
+        $workers->each(function ($workers, $queue) use ($supervisor, $pools, $workersPerSupervisor) {
+            $this->scalePool($supervisor, $pools[$queue], $workers, $workersPerSupervisor);
         });
     }
 
@@ -122,13 +137,18 @@ class AutoScaler
      * @param  float  $workers
      * @return void
      */
-    protected function scalePool(Supervisor $supervisor, $pool, $workers)
+    protected function scalePool(Supervisor $supervisor, $pool, $workers, $workersPerSupervisor)
     {
         $supervisor->pruneTerminatingProcesses();
 
         $totalProcessCount = $pool->totalProcessCount();
+        $queueName = $pool->queue();
 
-        $desiredProcessCount = ceil($workers);
+        if (in_array($queueName, array_keys($workersPerSupervisor))) {
+            $desiredProcessCount = $workersPerSupervisor[$queueName];
+        } else {
+            $desiredProcessCount = ceil($workers);
+        }
 
         if ($desiredProcessCount > $totalProcessCount) {
             $maxUpShift = min(
@@ -157,5 +177,34 @@ class AutoScaler
                 )
             );
         }
+    }
+
+    /**
+     * @return array
+     */
+    private function getQueueNamesForThrottleJobs(): array
+    {
+        $redisResponse = Redis::connection()->scan(0, ['match' => '*droppery_horizon*', 'count' => 100000]);
+        $jobsWithThrottleKey = array_filter($redisResponse[1], fn ($key) => str_contains($key, ':key:'));
+        $allMatches = [];
+
+        foreach ($jobsWithThrottleKey as $key) {
+            $matches = [];
+            preg_match('/((ws-)|(sp-)).*(?=:)/', $key, $matches);
+
+            if (in_array($matches[0], $allMatches)) {
+                continue;
+            }
+
+            $jobStatus = Redis::connection()->hGetAll($key)['status'] ?? 'completed';
+
+            if ($jobStatus !== 'pending') {
+                continue;
+            }
+
+            $allMatches[] = $matches[0];
+        }
+
+        return array_values(array_unique($allMatches));;
     }
 }
