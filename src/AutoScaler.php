@@ -192,7 +192,7 @@ class AutoScaler
             $matches = [];
             preg_match('/((ws-)|(sp-)).*(?=:)/', $key, $matches);
 
-            if (in_array($matches[0], $allMatches)) {
+            if (!isset($matches[0]) || in_array($matches[0], $allMatches)) {
                 continue;
             }
 
