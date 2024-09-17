@@ -196,15 +196,9 @@ class AutoScaler
                 continue;
             }
 
-            $jobStatus = Redis::connection()->hGetAll($key)['status'] ?? 'completed';
-
-            if ($jobStatus !== 'pending') {
-                continue;
-            }
-
             $allMatches[] = $matches[0];
         }
 
-        return array_values(array_unique($allMatches));;
+        return array_values(array_unique($allMatches));
     }
 }
